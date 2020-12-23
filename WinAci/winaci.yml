@@ -1,0 +1,26 @@
+apiVersion: apps/v1beta1
+kind: Deployment
+metadata:
+  name: whoami-deployment
+spec:
+  replicas: 1  
+  template:
+    metadata:
+      labels:
+        name: whoami
+    spec:    
+      containers:
+      - image: stefanscherer/whoami:windows-amd64-1.5.3
+        imagePullPolicy: Always
+        name: whoami
+        ports:
+        - containerPort: 80
+      nodeSelector:
+        kubernetes.io/role: agent
+        beta.kubernetes.io/os: windows
+        type: virtual-kubelet
+      tolerations:
+      - key: virtual-kubelet.io/provider
+        operator: Equal
+      - key: azure.com/aci
+        effect: NoSchedule

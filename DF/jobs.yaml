@@ -1,0 +1,41 @@
+parameters:
+  Environment: ''
+  WWNCRawStorageName: ''
+  WWNCRawStorageRG: ''
+  WWNCRawStorageSubscription: ''
+  ServiceBusSendPolicy: ''
+  AcrUsername: ''
+  AcrPassword: ''
+
+jobs:
+- job: FlowEstimationInfrastructure
+  container: toolkit
+  pool: 
+    vmImage: 'ubuntu-18.04'
+  variables:
+    - name: WWNCRawConnectionString
+      value: ""
+    - name: BSwainADLSKey
+      value: ""
+    - name: BSwainADLSConnectionString
+      value: ""
+  steps:
+    - task: AzureCLI@2
+      displayName: Get WWNC Raw Connection String
+      inputs:
+        azureSubscription: '${{ parameters.WWNCRawStorageSubscription }}'
+        scriptType: 'pscore'
+        scriptLocation: 'inlineScript'
+        inlineScript: |
+          $WWNCRawConnectionStringTemp = $(az storage account show-connection-string --name ${{ parameters.WWNCRawStorageName }} --resource-group ${{ parameters.WWNCRawStorageRG }} | ConvertFrom-Json).connectionString
+          Write-Host "##vso[task.setvariable variable=WWNCRawConnectionString]$WWNCRawConnectionStringTemp"
+        failOnStandardError: true
+    - task: AzureCLI@2
+      displayName: 'Apply and plan DF'
+      inputs:
+        azureSubscription: 'GiC-${{ parameters.Environment }}'
+        ScriptType: 'pscore'
+        scriptLocation: 'scriptPath'
+        scriptPath: 'Infrastructure/deploy.ps1'
+        arguments: '${{ parameters.Environment }} "$(WWNCRawConnectionString)" ${{ parameters.ServiceBusSendPolicy }} "${{ parameters.AcrUsername }}" "${{ parameters.AcrPassword }}"' 
+        addSpnToEnvironment: true

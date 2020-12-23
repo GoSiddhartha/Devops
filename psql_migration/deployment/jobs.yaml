@@ -1,0 +1,133 @@
+parameters:
+  SourceSubscription: ''
+  DestinationSubscription: ''
+  Vault: ''
+  Secret: ''
+  KubernetesSecret: ''
+  KubernetesConnection: ''
+  DevoneClusterName: 'devone'
+  DevoneResourceGroup: 'GF-RG-devone'
+  DevoneSubscription: '72e2f1e3-91e1-4bd9-9b3d-cd2e9e422501'
+
+jobs:
+- job: Migration
+  pool: vmssagents
+  container: toolkit
+  steps:
+    - task: AzureCLI@2
+      displayName: 'Install psql'
+      inputs:
+        azureSubscription: ${{ parameters.SourceSubscription}}
+        scriptType: bash
+        scriptLocation: inlineScript
+        inlineScript: | 
+          echo "START INSTALLATION===/"
+          echo "========================="
+          sudo apt-get update
+          sudo apt-get install postgresql-client
+          sudo apt install postgresql-client-common
+          echo "========================="
+
+    - task: AzureCLI@2
+      displayName: 'Get psql source credentials'
+      inputs:
+        azureSubscription: ${{ parameters.SourceSubscription}}
+        scriptType: pscore
+        scriptLocation: inlineScript
+        inlineScript: | 
+          Write-Host "START FETCHING==========/"
+          Write-Host "========================="
+          Write-Host "Setting connection string builder..."
+          $sb = New-Object System.Data.Common.DbConnectionStringBuilder
+          $connection = $(az keyvault secret show --vault-name ${{ parameters.Vault}} --name ${{ parameters.Secret}} --query 'value')
+          $connection = $connection -replace '"', ''
+          $sb.set_ConnectionString("$($connection)")
+          $tmpPassword = $sb["Password"]
+          $tmpHost = $sb["Server"]
+          $tmpUser = $sb["User Id"]
+          $tmpDatabase = $sb["Database"]
+          Write-Host "Setting connection variables..."
+          Write-Host "##vso[task.setvariable variable=PsSourceHost]$tmpHost"
+          Write-Host "##vso[task.setvariable variable=PsSourceUser]$tmpUser"
+          Write-Host "##vso[task.setvariable variable=PsSourcePassword]$tmpPassword"
+          Write-Host "##vso[task.setvariable variable=PsSourceDatabase]$tmpDatabase"
+          Write-Host "========================="
+
+    - task: AzureCLI@2
+      displayName: 'Create dump from source DB'
+      inputs:
+        azureSubscription: ${{ parameters.SourceSubscription}}
+        scriptType: pscore
+        scriptLocation: inlineScript
+        inlineScript: | 
+          Write-Host "STARTING TO DUMP========/"
+          Write-Host "========================="
+          Write-Host "Host:     $(PsSourceHost)"
+          Write-Host "User:     $(PsSourceUser)"
+          Write-Host "Password: ***"
+          Write-Host "Database: $(PsSourceDatabase)"
+          Write-Host "Setting up environment variables PGSSLMODE & PGPASSWORD"
+          Set-Item env:PGSSLMODE -Value "require"
+          Set-Item env:PGPASSWORD -Value "$(PsSourcePassword)"
+          Write-Host "STARTING BACKUP FOR $(PsSourceDatabase)..."
+          pg_dump -Fc -v --host=$(PsSourceHost) --username=$(PsSourceUser) --dbname=$(PsSourceDatabase) -f "$(PsSourceDatabase).dump" -x
+          Write-Host "========================="
+
+    - task: AzureCLI@2
+      timeoutInMinutes: 180
+      displayName: 'Get devone context'
+      inputs:
+        azureSubscription: 'GiCv2-D'
+        scriptType: pscore
+        scriptLocation: inlineScript
+        inlineScript: |
+          az aks get-credentials -n ${{ parameters.DevoneClusterName}} -g ${{ parameters.DevoneResourceGroup }} -a --subscription ${{ parameters.DevoneSubscription }}
+
+    - checkout: self
+      persistCredentials: true
+      clean: true
+
+    - task: AzureCLI@2
+      displayName: 'Get psql destination credentials'
+      inputs:
+        azureSubscription: ${{ parameters.DestinationSubscription}}
+        scriptType: bash
+        scriptLocation: inlineScript
+        inlineScript: | 
+          echo "START FETCHING==========/"
+          echo "========================="
+          echo "Fething values from k8s secret ${{ parameters.KubernetesConnection}}..."
+          export tmpPassword=$(kubectl get secret ${{ parameters.KubernetesConnection}} -n wwnc -o jsonpath="{.data.db_user_password}" | base64 --decode)
+          export tmpHost=$(kubectl get secret ${{ parameters.KubernetesConnection}} -n wwnc -o jsonpath="{.data.server_host}" | base64 --decode)
+          export tmpUser=$(kubectl get secret ${{ parameters.KubernetesConnection}} -n wwnc -o jsonpath="{.data.db_user_name}" | base64 --decode)
+          export tmpDatabase=$(kubectl get secret ${{ parameters.KubernetesConnection}} -n wwnc -o jsonpath="{.data.db_name}" | base64 --decode)
+          export tmpPort=$(kubectl get secret ${{ parameters.KubernetesConnection}} -n wwnc -o jsonpath="{.data.server_port}" | base64 --decode)
+          echo "Setting connection variables..."
+          echo "##vso[task.setvariable variable=PsDestHost]$tmpHost"
+          echo "##vso[task.setvariable variable=PsDestUser]$tmpUser"
+          echo "##vso[task.setvariable variable=PsDestPassword]$tmpPassword"
+          echo "##vso[task.setvariable variable=PsDestDatabase]$tmpDatabase"
+          echo "##vso[task.setvariable variable=PsDestPort]$tmpPort"
+          echo "========================="
+
+    - task: AzureCLI@2
+      displayName: 'Import from the dump created'
+      inputs:
+        azureSubscription: ${{ parameters.SourceSubscription}}
+        scriptType: pscore
+        scriptLocation: inlineScript
+        inlineScript: | 
+          Write-Host "STARTING TO DUMP========/"
+          Write-Host "========================="
+          Write-Host "Host:     $(PsDestHost)"
+          Write-Host "User:     $(PsDestUser)"
+          Write-Host "Password: ***"
+          Write-Host "Database: $(PsDestDatabase)"
+          Write-Host "Port:     $(PsDestPort)"
+          Write-Host "Setting up environment variables PGSSLMODE & PGPASSWORD"
+          Set-Item env:PGSSLMODE -Value "require"
+          Set-Item env:PGPASSWORD -Value "$(PsDestPassword)"
+          Write-Host "STARTING RESTORE TO $(PsDestPassword)..."
+          pg_restore -v --no-owner --host=$(PsDestHost) --port=$(PsDestPort) --username=$(PsDestUser) --dbname=$(PsDestDatabase) "$(PsSourceDatabase).dump" -x
+          Write-Host "========================="      
+    

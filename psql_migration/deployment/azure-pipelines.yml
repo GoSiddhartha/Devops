@@ -1,0 +1,35 @@
+variables:
+- group: wwnc_dbmigration_pipeline
+
+resources:
+  containers:
+    - container: toolkit
+      image: gfacrcorev2dazwe.azurecr.io/toolkit:1.6.3
+      endpoint: GiCV2-ACR-D
+
+parameters:
+  - name: name
+    displayName: Name of the managed cluster
+    type: string
+    default: 'devone'
+  - name: resourceGroup
+    displayName: Name of resource group
+    type: string
+    default: 'GF-RG-devone'
+  - name: subscription
+    displayName: Name or ID of subscription
+    type: string
+    default: '72e2f1e3-91e1-4bd9-9b3d-cd2e9e422501'
+    
+stages:
+- stage: PostgresMigration_X1
+  condition: startsWith(variables['Build.SourceBranch'], 'refs/heads/feature/')
+  jobs:
+    - template: jobs.yaml
+      parameters:
+        SourceSubscription: GiC-X1
+        DestinationSubscription: GiCv2-D
+        Vault: gf-keyv-wwnc-networ-x1-1
+        Secret: Postgresql--ConnectionString
+        KubernetesSecret: 'waste-water-dev01-wwnc-waste-water-dev01-admin'
+        KubernetesConnection: ''

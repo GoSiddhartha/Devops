@@ -1,0 +1,57 @@
+# Starter pipeline
+# Start with a minimal pipeline that you can customize to build and deploy your code.
+# Add steps that build, run tests, deploy, and more:
+# https://aka.ms/yaml
+
+variables:
+- group: wwnc_df_pipeline
+
+resources:
+  containers:
+    - container: toolkit
+      image: gfacrcorev2dazwe.azurecr.io/toolkit:1.6.4
+      endpoint: GiCV2-ACR-D
+
+pool: self-hosted-agents
+
+stages:
+- stage: Test
+  jobs:
+    - template: jobs.yaml
+      parameters:
+        Environment: 't'
+        TFRemoteAccessToken: $(AccessToken)
+        WWNCRawStorageName: gfstohighfreqdatatazwe
+        WWNCRawStorageRG: GF-RG-Conn-T
+        WWNCRawStorageSubscription: 'Gic-T'
+        ServiceBusSendPolicy: $(sb_send_pol_t)
+        AcrUsername: $(Acr_Username)
+        AcrPassword: $(Acr_Password)
+
+- stage: QA
+  dependsOn: Test
+  jobs:
+    - template: jobs.yaml
+      parameters:
+        Environment: 'q'
+        TFRemoteAccessToken: $(AccessToken)
+        WWNCRawStorageName: gfstohighfreqdataqazwe
+        WWNCRawStorageRG: GF-RG-Conn-Q
+        WWNCRawStorageSubscription: 'Dynamics CFS(SPN)'
+        ServiceBusSendPolicy: $(sb_send_pol_q)
+        AcrUsername: $(Acr_Username)
+        AcrPassword: $(Acr_Password)
+
+- stage: Prod
+  dependsOn: QA
+  jobs:
+    - template: jobs.yaml
+      parameters:
+        Environment: 'p'
+        TFRemoteAccessToken: $(AccessToken)
+        WWNCRawStorageName: gfstohighfreqdatapazwe
+        WWNCRawStorageRG: GF-RG-Conn-P
+        WWNCRawStorageSubscription: 'Dynamics CFS(SPN)'
+        ServiceBusSendPolicy: $(sb_send_pol_p)
+        AcrUsername: $(Acr_Username)
+        AcrPassword: $(Acr_Password)
